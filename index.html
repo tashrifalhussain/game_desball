@@ -1,0 +1,287 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Breakout Game</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.3/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    @keyframes rainbow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      background-color: #340068;
+      background-image: url('https://image.shutterstock.com/image-illustration/vhs-noise-grainy-texture-transformed-260nw-784123193.jpg');
+      background-size: cover;
+      color: white;
+    }
+    canvas {
+      border: 3px solid #ff0000;
+      max-width: 100%;
+      max-height: 100%;
+      margin: auto;
+      display: block;
+    }
+    #startContainer {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.85);
+    }
+    h1 {
+      font-family: 'Press Start 2P', cursive;
+      background-image: linear-gradient(90deg, #f0d, #f42, #0af, #0fb, #f0d, #f42);
+      background-size: 400%;
+      -webkit-text-fill-color: transparent;
+      -webkit-background-clip: text;
+      animation: rainbow 5s linear infinite;
+      line-height: 1.2;
+    }
+    button {
+      background-color: #ff0000;
+      border: none;
+      color: white;
+      padding: 12px 24px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 16px;
+      cursor: pointer;
+      outline: none;
+      margin-top: 8px;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #e80000;
+    }
+
+    #difficulty {
+      appearance: none;
+      outline: 0;
+      background-color: #aaa;
+      background-image: none;
+      padding: 0 1em;
+      cursor: pointer;
+      border-radius: 4px;
+      min-width: 100px;
+      font-family: inherit;
+      font-size: 1em;
+    }
+    #scoreText, #livesText {
+      font-family: 'Press Start 2P', cursive;
+    }
+  </style>
+</head>
+<body>
+  <div id="startContainer" class="flex flex-col items-center justify-center w-full h-full fixed z-10 bg-black bg-opacity-75">
+    <h1 class="text-4xl mb-4 text-white text-shadow">Simple Breakout Game</h1>
+    <label for="difficulty">Choose difficulty:</label>
+    <select id="difficulty" class="bg-gray-200 text-black rounded px-2 py-1 mb-4">
+      <option value="1">Easy</option>
+      <option value="2">Medium</option>
+      <option value="3">Hard</option>
+    </select>
+    <button id="startButton" class="bg-red-600 text-white px-8 py-4 rounded hover:bg-red-500">Start Game</button>
+  </div>
+  <script>
+    const config = {
+      type: Phaser.AUTO,
+      width: 800,
+      height: 600,
+      physics: {
+        default: 'arcade',
+        arcade: {
+          gravity: { y: 0 },
+          debug: false
+        }
+      },
+      scene: {
+        preload: preload,
+        create: create,
+        update: update
+      }
+    };
+
+    let game;
+    let score = 0;
+    let level = 1;
+    let lives = 3;
+    let scoreText;
+    let livesText;
+    let started = false;
+
+    function startGame() {
+      document.getElementById("startContainer").style.display = "none";
+      const difficulty = parseInt(document.getElementById("difficulty").value);
+      started = false;
+      game = new Phaser.Game(config);
+    }
+
+    document.getElementById("startButton").onclick = startGame;
+
+    function preload() {
+      this.load.image('ball', 'https://labs.phaser.io/assets/sprites/blue_ball.png');
+      this.load.image('paddle', 'https://labs.phaser.io/assets/sprites/paddle.png');
+      this.load.image('block', 'https://labs.phaser.io/assets/sprites/block.png');
+      this.load.image('particle', 'https://labs.phaser.io/assets/particles/red.png');
+    }
+
+    let ball;
+    let paddle;
+    let cursors;
+    let blocks;
+    let emitters = [];
+
+    function create() {
+      ball = this.physics.add.sprite(400, 300, 'ball');
+      paddle = this.physics.add.sprite(400, 580, 'paddle').setImmovable();
+      cursors = this.input.keyboard.createCursorKeys();
+      this.input.on('pointerdown', launchBall, this); // listen for tap on mobile
+
+      ball.setCollideWorldBounds(true).setBounce(1);
+      paddle.setCollideWorldBounds(true);
+
+      paddle.setDisplaySize(paddle.width * 2, paddle.height); // double the paddle width
+
+      this.physics.add.collider(ball, paddle, ballHitPaddle, null, this);
+
+      // Blocks generation with custom shapes
+      blocks = this.physics.add.staticGroup();
+      generateBlocks(this);
+
+      this.physics.add.collider(ball, blocks, ballHitBlock, null, this);
+
+      // Score text
+      scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '20px', fill: '#FFF' });
+      scoreText.id = "scoreText";
+
+      // Lives text
+      livesText = this.add.text(670, 16, 'Lives: 3', { fontSize: '20px', fill: '#FFF' });
+      livesText.id = "livesText";
+
+      // Set ball on paddle
+      ball.setPosition(paddle.x, paddle.y - ball.height / 2 - paddle.height / 2);
+      ball.setVelocity(0, 0);
+    }
+
+    function update() {
+      if (cursors.left.isDown) {
+        paddle.setVelocityX(-350);
+      } else if (cursors.right.isDown) {
+        paddle.setVelocityX(350);
+      } else {
+        paddle.setVelocityX(0);
+      }
+        
+      if (!started) {
+        ball.x = paddle.x;
+      }
+
+      if (cursors.space.isDown || cursors.up.isDown) {
+        launchBall();
+      }
+
+      if (ball.y > paddle.y) {
+        loseLife();
+      }
+    }
+
+    function ballHitPaddle(ball, paddle) {
+      const diff = Math.abs(ball.x - paddle.x) / paddle.width;
+      ball.setVelocityX(150 * (diff * 2));
+    }
+
+    function launchBall() {
+      if (!started) {
+        const difficulty = parseInt(document.getElementById("difficulty").value);
+        started = true;
+        ball.setVelocityY(-300 * difficulty).setVelocityX(150 * difficulty);
+      }
+    }
+
+    function ballHitBlock(ball, block) {
+      block.disableBody(true, true);
+
+      const particleEmitter = game.scene.scenes[0].add.particles('particle').createEmitter({
+        speed: { min: -100, max: 100 },
+        angle: { min: 0, max: 360 },
+        scale: { start: 1, end: 0 },
+        blendMode: 'ADD',
+        lifespan: 2000,
+        emitZone: {
+          source: new Phaser.Geom.Rectangle(block.x - 44, block.y - 16, block.width, block.height)
+        },
+        on: false
+      });
+      
+      particleEmitter.emitParticle(50);
+
+      score += 10;
+      scoreText.setText('Score: ' + score);
+
+      if (blocks.countActive() === 0) {
+        startNextLevel();
+      }
+    }
+
+    function startNextLevel() {
+      level += 1;
+      ball.setVelocityY(-300 * level).setVelocityX(150 * level);
+      generateBlocks(game.scene.scenes[0]);
+    }
+
+    function loseLife() {
+      lives--;
+      livesText.setText('Lives: ' + lives);
+
+      if (lives > 0) {
+        ball.setPosition(paddle.x, paddle.y - ball.height / 2 - paddle.height / 2); // properly reset ball on paddle
+        started = false;
+        ball.setVelocityY(0).setVelocityX(0);
+      } else {
+        restartGame();
+      }
+    }
+
+    function restartGame() {
+      game.destroy(true);
+      document.getElementById("startContainer").style.display = "flex";
+      score = 0;
+      level = 1;
+      lives = 3;
+      started = false;
+    }
+
+    function generateBlocks(scene) {
+      const numRows = Phaser.Math.Between(3, 7);
+      const numColumns = Phaser.Math.Between(5, 10);
+      const marginHorizontal = (scene.sys.game.config.width - (numColumns * (88 + 8))) / 2;
+
+      for (let i = 0; i < numRows; i++) {
+        for (let j = 0; j < numColumns; j++) {
+          const x = marginHorizontal + (j * (88 + 8)); // added 8 pixels of spacing between blocks
+          const y = 50 + (i * (31 + 8)); // added 8 pixels of spacing between blocks
+          const block = blocks.create(x, y, "block");
+          block.setDisplaySize(88, 31); // set display size to 88x31
+          const blockColor = Phaser.Display.Color.RandomRGB();
+          const tint = Phaser.Display.Color.ValueToColor(blockColor);
+          block.setTint(tint.color);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
